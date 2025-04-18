@@ -1,0 +1,22 @@
+# ML Core Dependencies
+numpy>=1.24.0,<2.0.0
+pandas>=2.0.0,<2.2.0
+scikit-learn>=1.2.0,<1.4.0
+joblib>=1.1.0
+
+# API Dependencies
+fastapi>=0.95.0
+uvicorn>=0.20.0
+pydantic>=2.0.0
+
+# CORS Support
+fastapi-cors>=0.0.4
+
+# Data Visualization (optional but recommended)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Development Tools
+pytest>=7.0.0
+black>=23.0.0
+flake8>=6.0.0 

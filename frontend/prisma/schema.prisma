@@ -1,0 +1,89 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Models for the tender application
+
+model User {
+  id            String    @id @default(cuid())
+  walletAddress String    @unique  // Primary identifier from MetaMask
+  name          String?   // Optional display name
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  tenders       Tender[]  @relation("CreatedTenders")
+  bids          Bid[]
+}
+
+model Tender {
+  id          String    @id @default(cuid())
+  title       String
+  description String
+  budget      Float
+  deadline    DateTime
+  status      TenderStatus @default(OPEN)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  creatorId   String
+  creator     User      @relation("CreatedTenders", fields: [creatorId], references: [id])
+  bids        Bid[]
+  documents   Document[]
+  categories  Category[]
+}
+
+model Bid {
+  id          String    @id @default(cuid())
+  amount      Float
+  proposal    String
+  status      BidStatus @default(PENDING)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  tenderId    String
+  tender      Tender    @relation(fields: [tenderId], references: [id])
+  bidderId    String
+  bidder      User      @relation(fields: [bidderId], references: [id])
+  documents   Document[]
+}
+
+model Document {
+  id          String    @id @default(cuid())
+  name        String
+  url         String
+  fileType    String
+  createdAt   DateTime  @default(now())
+  tenderId    String?
+  tender      Tender?   @relation(fields: [tenderId], references: [id])
+  bidId       String?
+  bid         Bid?      @relation(fields: [bidId], references: [id])
+}
+
+model Category {
+  id          String    @id @default(cuid())
+  name        String    @unique
+  tenders     Tender[]
+}
+
+enum TenderStatus {
+  OPEN
+  CLOSED
+  AWARDED
+  COMPLETED
+  CANCELLED
+}
+
+enum BidStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
