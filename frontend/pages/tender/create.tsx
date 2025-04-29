@@ -68,6 +68,18 @@ export default function CreateTender() {
     let tenderId: string | null = null;
     
     try {
+      // Force contract reinitialization before proceeding
+      console.log("Forcing contract reinitialization before creating tender");
+      const initResult = await contractTender.forceContractInitialization();
+      
+      if (!initResult) {
+        throw new Error("Не удалось инициализировать смарт-контракт. Пожалуйста, убедитесь, что ваш кошелек подключен и вы находитесь в сети Sepolia.");
+      }
+      
+      if (!contractTender.isContractAvailable) {
+        throw new Error("Смарт-контракт недоступен. Пожалуйста, переподключите кошелек и попробуйте снова.");
+      }
+      
       // 3. Save to blockchain
       console.log("Saving tender to blockchain...");
       const title = form.title || `Перевозка груза (${form.weight} кг) на ${form.distance} км`;
@@ -83,10 +95,22 @@ export default function CreateTender() {
       const budget = form.budget ? parseFloat(form.budget) : 2000; // Значение по умолчанию
       const expirationMinutes = parseInt(form.expirationMinutes || '10');
       
-      // Only try to save to blockchain if contract is available
-      if (contractTender.isContractAvailable) {
-        console.log("Sending to blockchain with deadline timestamp:", deadlineTimestamp);
-        
+      // Улучшенное логирование для отладки
+      console.log("Form data:", {
+        title,
+        description,
+        budget,
+        deadlineTimestamp,
+        distance: form.distance,
+        weight: form.weight,
+        cargoType: form.cargoType,
+        urgencyDays: form.urgencyDays,
+        expirationMinutes
+      });
+      
+      console.log("Sending to blockchain with deadline timestamp:", deadlineTimestamp);
+      
+      try {
         const contractResponse = await contractTender.createTender(
           title,
           description,
@@ -109,58 +133,71 @@ export default function CreateTender() {
             console.log("Tender created in blockchain with ID:", tenderId);
           } else {
             console.warn("Tender was created but couldn't get proper ID from blockchain. Using fallback:", tenderId);
-            blockchainSuccess = false;
-            blockchainError = new Error("Не удалось получить ID тендера из блокчейна");
+            // Если ID не получен должным образом, запрашиваем текущее количество тендеров
+            try {
+              console.log("Attempting to get current tender count from contract");
+              // Здесь мы хотим получить актуальный ID созданного тендера
+              const tenderCount = await contractTender.getTenderCount();
+              console.log("Current tender count:", tenderCount);
+              if (tenderCount && parseInt(tenderCount) > 0) {
+                // Скорее всего, последний ID будет tenderCount - 1
+                const probableId = (parseInt(tenderCount) - 1).toString();
+                console.log("Probable tender ID based on count:", probableId);
+                tenderId = probableId;
+                blockchainSuccess = true;
+              } else {
+                blockchainSuccess = false;
+                blockchainError = new Error("Не удалось получить ID тендера из блокчейна");
+              }
+            } catch (countError) {
+              console.error("Error getting tender count:", countError);
+              blockchainSuccess = false;
+              blockchainError = new Error("Не удалось получить ID тендера из блокчейна");
+            }
           }
         } else {
           blockchainError = new Error(contractResponse.error || "Unknown blockchain error");
           console.error("Blockchain error:", contractResponse.error);
+          throw blockchainError;
         }
-      } else {
-        console.log("Blockchain contract not available, skipping blockchain storage");
-        blockchainError = new Error("Smart contract is not available or properly deployed");
+      } catch (txError: unknown) {
+        console.error("Transaction error:", txError);
+        blockchainError = new Error(`Transaction error: ${txError instanceof Error ? txError.message : "Unknown error"}`);
+        throw blockchainError;
       }
 
-      // 4. Save metadata to database (даже если блокчейн не сработал)
-      console.log("Saving tender metadata to database...");
-      
-      if (!account) {
-        throw new Error("Кошелек не подключен");
-      }
-
-      const tenderResponse = await tenderAPI.createTender({
-        title,
-        description,
-        budget,
-        deadline: deadline.toISOString(), // Keep using ISO string for the API
-        walletAddress: account,
-        categories: [form.cargoType]
-      });
-
-      if (tenderResponse.error) {
-        throw new Error(`Ошибка сохранения метаданных: ${tenderResponse.error}`);
-      }
-
-      // 5. Handle success/partial success
+      // 4. Only if blockchain storage succeeds, also save metadata to database
       if (blockchainSuccess) {
-        console.log("Tender successfully created in both blockchain and database");
-        alert("Тендер успешно создан! Он будет доступен " + expirationMinutes + " минут.");
-      } else {
-        console.log("Tender created in database only");
-        alert("Тендер сохранен в базе данных, но произошла ошибка при сохранении в блокчейн: " + 
-          (blockchainError ? blockchainError.message : "Неизвестная ошибка"));
-      }
+        console.log("Tender successfully created in blockchain. Now saving metadata to database...");
+        
+        if (!account) {
+          throw new Error("Кошелек не подключен");
+        }
 
-      router.push('/dashboard');
+        const tenderResponse = await tenderAPI.createTender({
+          title,
+          description,
+          budget,
+          deadline: deadline.toISOString(), // Keep using ISO string for the API
+          walletAddress: account,
+          categories: [form.cargoType]
+        });
+
+        if (tenderResponse.error) {
+          console.warn(`Warning: Database metadata storage failed: ${tenderResponse.error}`);
+          // Continue anyway since blockchain storage succeeded
+        }
+
+        // 5. Success message
+        console.log("Tender successfully created in blockchain");
+        alert("Тендер успешно создан в блокчейне! Он будет доступен " + expirationMinutes + " минут.\nID тендера: " + tenderId);
+        router.push('/dashboard');
+      } else {
+        throw new Error("Не удалось сохранить тендер в блокчейне");
+      }
     } catch (error) {
       console.error("Error creating tender:", error);
-      
-      // 6. Handle different error scenarios
-      if (blockchainError) {
-        alert(`Ошибка создания тендера в блокчейне: ${blockchainError.message}`);
-      } else {
-        alert(`Ошибка: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
-      }
+      alert(`Ошибка создания тендера: ${error instanceof Error ? error.message : 'Неизвестная ошибка'}`);
     } finally {
       setLoading(false);
     }
@@ -188,8 +225,84 @@ export default function CreateTender() {
         <h3 className="font-bold">Отладочная информация:</h3>
         <p>Адрес контракта: {process.env.NEXT_PUBLIC_CONTRACT_ADDRESS}</p>
         <p>Кошелек подключен: {account ? 'Да' : 'Нет'}</p>
+        <p>Адрес кошелька: {account || 'Не подключен'}</p>
         <p>Доступность контракта: {contractTender.isContractAvailable ? 'Доступен' : 'Недоступен'}</p>
+        <p>Статус контракта: {contractTender.contractStatus}</p>
         <p>Ошибка контракта: {contractTender.error || 'Нет'}</p>
+        {contractTender.contractErrorDetails && (
+          <p>Детали ошибки: {contractTender.contractErrorDetails}</p>
+        )}
+        <div className="mt-2 flex space-x-2">
+          <button
+            onClick={() => contractTender.forceContractInitialization()}
+            className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none"
+          >
+            Переподключиться к контракту
+          </button>
+          
+          <button
+            onClick={async () => {
+              if (typeof window !== 'undefined' && window.ethereum) {
+                try {
+                  const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+                  alert(`Текущая сеть: ${chainId}\n` + 
+                        `- Sepolia Testnet: 0xaa36a7\n` +
+                        `- Hardhat Local: 0x7a69\n\n` +
+                        `Статус контракта: ${contractTender.isContractAvailable ? 'Доступен' : 'Недоступен'}`);
+                } catch (error) {
+                  alert('Ошибка при получении информации о сети');
+                }
+              } else {
+                alert('MetaMask не обнаружен');
+              }
+            }}
+            className="text-xs px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600 focus:outline-none"
+          >
+            Проверить сеть
+          </button>
+          
+          <button
+            onClick={async () => {
+              if (typeof window !== 'undefined' && window.ethereum) {
+                try {
+                  await window.ethereum.request({ 
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: '0xaa36a7' }] // Sepolia chainId
+                  });
+                  alert('Переключено на сеть Sepolia');
+                  // After switching, try to initialize the contract
+                  await contractTender.forceContractInitialization();
+                } catch (error: any) {
+                  // If Sepolia isn't added to the wallet yet
+                  if (error.code === 4902) {
+                    try {
+                      await window.ethereum.request({
+                        method: 'wallet_addEthereumChain',
+                        params: [{
+                          chainId: '0xaa36a7',
+                          chainName: 'Sepolia Testnet',
+                          nativeCurrency: { name: 'ETH', symbol: 'ETH', decimals: 18 },
+                          rpcUrls: ['https://sepolia.infura.io/v3/'],
+                          blockExplorerUrls: ['https://sepolia.etherscan.io/']
+                        }]
+                      });
+                      alert('Добавлена сеть Sepolia. Пожалуйста, попробуйте переключиться снова.');
+                    } catch (addError: any) {
+                      alert('Ошибка при добавлении сети Sepolia: ' + addError.message);
+                    }
+                  } else {
+                    alert('Ошибка при переключении сети: ' + error.message);
+                  }
+                }
+              } else {
+                alert('MetaMask не обнаружен');
+              }
+            }}
+            className="text-xs px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 focus:outline-none"
+          >
+            Переключиться на Sepolia
+          </button>
+        </div>
       </div>
       
       <div className="bg-white rounded-lg shadow p-6 max-w-2xl mx-auto">

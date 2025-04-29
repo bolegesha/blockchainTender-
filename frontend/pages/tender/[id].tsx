@@ -1,22 +1,40 @@
-import { useState, useEffect, useCallback, memo, useRef, useMemo } from 'react';
 import { useRouter } from 'next/router';
+import { useState, useEffect, useCallback, memo, FormEvent } from 'react';
+import { toast } from 'react-hot-toast';
 import Navbar from '../../components/Navbar';
 import { useWeb3 } from '../../hooks/useWeb3';
-import useContractTender, { ContractTender } from '../../hooks/useContractTender';
+import useContractTender, { ContractTender, TenderStatus } from '../../hooks/useContractTender';
 import useTenderAPI from '../../hooks/useTenderAPI';
 import { ethers } from 'ethers';
-import { toast } from 'react-hot-toast';
-import { FormEvent } from 'react';
 import Link from 'next/link';
 import BidsList from '../../components/BidsList';
-import TenderModal, { TenderDetails } from '../../components/TenderModal';
 import BidsListBlock from '../../components/BidsListBlock';
+import TenderModal, { TenderDetails } from '../../components/TenderModal';
+import React from 'react';
 
-// Define TenderStatus
-type TenderStatus = 'OPEN' | 'CLOSED' | 'AWARDED' | 'COMPLETED' | 'CANCELLED';
+// Define a simple Bid interface if ../../types/tender is not available
+interface Bid {
+  id: string;
+  bidder: string;
+  bidderId?: string;
+  amount: number;
+  proposal?: string;
+  details?: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN';
+  timestamp: string;
+  createdAt?: string;
+  updatedAt?: string;
+  tenderId?: string;
+  transactionHash?: string;
+}
+
+// For session handling without next-auth, use a simpler approach
+const useSession = () => {
+  return { data: null };
+};
 
 // Расширенный интерфейс для ContractTender, добавляющий дополнительные поля
-interface ExtendedContractTender extends ContractTender {
+interface ExtendedContractTender {
   fromBlockchain?: boolean;
   isFromBlockchain?: boolean;
   // API fields that may not be in the blockchain data
@@ -37,6 +55,17 @@ interface ExtendedContractTender extends ContractTender {
   paymentType?: string;
   skills?: string[];
   location?: string;
+  id: string;
+  title: string;
+  description: string;
+  budget: number | string;
+  deadline: string | number | bigint;
+  status: TenderStatus;
+  createdAt: string;
+  expiresAt: string;
+  timeLeft?: number | string;
+  blockchainId?: string;
+  bids?: any[];
 }
 
 // Типизация для BidForm
@@ -44,22 +73,6 @@ interface BidFormProps {
   tenderId: string;
   onBidSubmitted: () => void;
   disabled?: boolean;
-}
-
-// Типизация для заявки
-interface Bid {
-  id: string;
-  bidder: string;
-  bidderId?: string;
-  amount: number;
-  proposal?: string;
-  details?: string;
-  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'WITHDRAWN';
-  timestamp: string;
-  createdAt?: string;
-  updatedAt?: string;
-  tenderId?: string;
-  transactionHash?: string;
 }
 
 // Extended Bid interface that includes isFromBlockchain property
@@ -128,7 +141,7 @@ const extractStringFromDescription = (description: string, prefix: string): stri
 };
 
 // Helper function to convert a blockchain tender to TenderDetails type
-const adaptBlockchainTenderToDetails = (blockchainTender: any): ExtendedContractTender => {
+const adaptBlockchainTenderToExtended = (blockchainTender: any): ExtendedContractTender => {
   // Convert budget to number type
   const budget = typeof blockchainTender.budget === 'string' 
     ? parseFloat(blockchainTender.budget) 
@@ -153,7 +166,9 @@ const adaptBlockchainTenderToDetails = (blockchainTender: any): ExtendedContract
     fromBlockchain: true,
     // Дополнительные поля, требуемые типом ExtendedContractTender
     isFromBlockchain: true,
-    updatedAt: blockchainTender.createdAt // Используем createdAt как запасной вариант
+    updatedAt: blockchainTender.createdAt, // Используем createdAt как запасной вариант
+    blockchainId: blockchainTender.blockchainId,
+    bids: blockchainTender.bids
   };
 };
 
@@ -171,6 +186,13 @@ export default function TenderDetail() {
   const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
   const [isFromDatabase, setIsFromDatabase] = useState(true);
   const [showBidModal, setShowBidModal] = useState(false);
+  const { data: session } = useSession();
+  const [isBidSubmitted, setIsBidSubmitted] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [tenderBlockchainStatus, setTenderBlockchainStatus] = useState<{exists: boolean, message: string} | null>(null);
+  const [isBlockchainLoading, setIsBlockchainLoading] = useState(false);
+  const [showBlockchainModal, setShowBlockchainModal] = useState(false);
+  const [blockchainError, setBlockchainError] = useState<string | null>(null);
 
   // Функция для форматирования времени
   const formatTime = useCallback((seconds: number): string => {
@@ -204,19 +226,19 @@ export default function TenderDetail() {
       const apiResponse = await tenderAPI.getTenderById(id as string);
       
       if (apiResponse.data) {
-        const rawTender = apiResponse.data;
-        const details = extractTenderDetails(rawTender.description);
+        // Extract additional details from the description if applicable
+        const extractedDetails = extractTenderDetails(apiResponse.data.description);
         
         const adaptedTender = {
-          ...rawTender,
+          ...apiResponse.data,
           isFromBlockchain: false,
           fromBlockchain: false,
-          // Extract from description or use default values
-          bidder: "0x0000000000000000000000000000000000000000",
-          distance: details.distance || 0,
-          weight: details.weight || 0,
-          cargoType: details.cargoType || "general",
-          urgencyDays: details.urgencyDays || 0
+          // Use optional chaining for properties that may not exist
+          bidder: (apiResponse.data as any)?.bidder || "0x0000000000000000000000000000000000000000",
+          distance: (apiResponse.data as any)?.distance || 0,
+          weight: (apiResponse.data as any)?.weight || 0,
+          cargoType: (apiResponse.data as any)?.cargoType || "general",
+          urgencyDays: (apiResponse.data as any)?.urgencyDays || 0
         } as unknown as ExtendedContractTender;
         
         setTender(adaptedTender);
@@ -237,10 +259,14 @@ export default function TenderDetail() {
             fromBlockchain: true
           };
           
-          setTender(adaptBlockchainTenderToDetails(blockchainTender));
+          setTender(adaptBlockchainTenderToExtended(blockchainTender));
           setIsFromDatabase(false);
           setLoading(false);
           return;
+        } else {
+          // If getTender returned an error, show the error
+          console.error("Error from blockchain:", blockchainResponse.error);
+          setError(blockchainResponse.error || 'Тендер не найден в блокчейне');
         }
       }
       
@@ -263,23 +289,43 @@ export default function TenderDetail() {
 
   // Обновление таймера каждую секунду
   useEffect(() => {
-    if (!tender?.expiresAt) return;
+    if (!tender || !tender.expiresAt) return;
     
     const expiresAt = new Date(tender.expiresAt).getTime();
     
     const timerInterval = setInterval(() => {
       const now = Date.now();
-      const diff = Math.max(0, Math.floor((expiresAt - now) / 1000));
+      const secondsLeft = Math.max(0, Math.floor((expiresAt - now) / 1000));
       
-      setTimeLeft(formatTime(diff));
-      
-      if (diff <= 0) {
+      if (secondsLeft <= 0) {
         clearInterval(timerInterval);
+        setTimeLeft('Время истекло');
+      } else {
+        setTimeLeft(formatTime(secondsLeft));
       }
     }, 1000);
     
     return () => clearInterval(timerInterval);
   }, [tender?.expiresAt, formatTime]);
+
+  // Safe date rendering helper
+  const safeRenderDate = (dateStr: string | number | bigint | undefined) => {
+    if (!dateStr) return 'Не указано';
+    
+    try {
+      // Handle different date formats
+      if (typeof dateStr === 'bigint') {
+        return new Date(Number(dateStr)).toLocaleString();
+      } else if (typeof dateStr === 'number') {
+        return new Date(dateStr).toLocaleString();
+      } else {
+        return new Date(dateStr).toLocaleString();
+      }
+    } catch (e) {
+      console.error('Error rendering date:', e);
+      return 'Неверный формат даты';
+    }
+  };
 
   // Выводим информацию о тендере и условиях для отображения кнопки для участия
   useEffect(() => {
@@ -313,13 +359,7 @@ export default function TenderDetail() {
 
   // Функция для "забирания" тендера
   const handleTakeTender = async () => {
-    if (!tender || !account) return;
-    
-    // Проверяем, что пользователь не является создателем тендера
-    if (tender.creator?.toLowerCase() === account.toLowerCase()) {
-      setError('Вы не можете участвовать в собственном тендере');
-      return;
-    }
+    if (!account || !tender) return;
     
     setActionLoading(true);
     setError(null);
@@ -329,13 +369,14 @@ export default function TenderDetail() {
       
       if (response.success) {
         alert('Тендер успешно забронирован за вами!');
-        await fetchTender(); // Обновляем данные тендера
+        // Перезагружаем страницу для обновления данных
+        await fetchTender();
       } else {
-        throw new Error(response.error || 'Не удалось забрать тендер');
+        setError(response.error || 'Ошибка при бронировании тендера');
       }
     } catch (err) {
-      console.error("Error taking tender:", err);
-      setError(err instanceof Error ? err.message : 'Произошла ошибка при попытке забрать тендер');
+      console.error('Error taking tender:', err);
+      setError(err instanceof Error ? err.message : 'Ошибка при бронировании тендера');
     } finally {
       setActionLoading(false);
     }
@@ -343,7 +384,7 @@ export default function TenderDetail() {
 
   // Функция для завершения тендера
   const handleCompleteTender = async () => {
-    if (!tender || !account) return;
+    if (!account || !tender) return;
     
     setActionLoading(true);
     setError(null);
@@ -353,13 +394,14 @@ export default function TenderDetail() {
       
       if (response.success) {
         alert('Тендер успешно завершен!');
-        await fetchTender(); // Обновляем данные тендера
+        // Перезагружаем страницу для обновления данных
+        await fetchTender();
       } else {
-        throw new Error(response.error || 'Не удалось завершить тендер');
+        setError(response.error || 'Ошибка при завершении тендера');
       }
     } catch (err) {
-      console.error("Error completing tender:", err);
-      setError(err instanceof Error ? err.message : 'Произошла ошибка при попытке завершить тендер');
+      console.error('Error completing tender:', err);
+      setError(err instanceof Error ? err.message : 'Ошибка при завершении тендера');
     } finally {
       setActionLoading(false);
     }
@@ -367,7 +409,7 @@ export default function TenderDetail() {
 
   // Функция для отмены тендера
   const handleCancelTender = async () => {
-    if (!tender || !account) return;
+    if (!account || !tender) return;
     
     setActionLoading(true);
     setError(null);
@@ -377,328 +419,280 @@ export default function TenderDetail() {
       
       if (response.success) {
         alert('Тендер успешно отменен!');
-        await fetchTender(); // Обновляем данные тендера
+        // Перезагружаем страницу для обновления данных
+        await fetchTender();
       } else {
-        throw new Error(response.error || 'Не удалось отменить тендер');
+        setError(response.error || 'Ошибка при отмене тендера');
       }
     } catch (err) {
-      console.error("Error cancelling tender:", err);
-      setError(err instanceof Error ? err.message : 'Произошла ошибка при попытке отменить тендер');
+      console.error('Error cancelling tender:', err);
+      setError(err instanceof Error ? err.message : 'Ошибка при отмене тендера');
     } finally {
       setActionLoading(false);
     }
   };
 
-  // Компонент для участия в тендере (подачи заявки)
-  const BidForm = memo(function BidForm({ tenderId, onBidSubmitted, disabled = false }: BidFormProps) {
+  // Refreshing the data when needed
+  const refreshData = useCallback(() => {
+    if (id && typeof id === 'string' && tender) {
+      const isNumericId = !isNaN(Number(id));
+      
+      // Refresh bids list
+      if (isNumericId && tender.fromBlockchain) {
+        console.log('Refreshing blockchain tender data');
+        contractTender.getTender(id).then(result => {
+          if (result.success && result.data) {
+            const budgetValue = typeof result.data.budget === 'string' 
+              ? parseFloat(result.data.budget) 
+              : Number(result.data.budget);
+            
+            setTender({
+              ...tender,
+              ...result.data,
+              budget: budgetValue,
+              fromBlockchain: true
+            });
+          } else if (result.error) {
+            console.error("Error refreshing tender data:", result.error);
+            toast.error(`Could not refresh tender: ${result.error}`);
+          }
+        });
+      }
+    }
+  }, [id, tender, contractTender]);
+  
+  // Helper function to safely migrate a tender to blockchain
+  const migrateTenderToBlockchain = async () => {
+    if (!contractTender || !tender) return null;
+    
+    setIsBlockchainLoading(true);
+    setBlockchainError(null);
+    
+    try {
+      const result = await contractTender.migrateTenderToBlockchain(
+        tender.id,
+        tender.title,
+        tender.description,
+        String(tender.budget),
+        tender.deadline,
+        tender.status
+      );
+      
+      return result;
+    } catch (error) {
+      console.error("Blockchain migration error:", error);
+      setBlockchainError(typeof error === 'string' ? error : "Произошла ошибка при переносе тендера в блокчейн");
+      return {
+        success: false,
+        error: typeof error === 'string' ? error : "Произошла ошибка при переносе тендера в блокчейн"
+      };
+    } finally {
+      setIsBlockchainLoading(false);
+    }
+  };
+  
+  // Bid Form Component with type-safe props
+  const BidForm = memo(({ tenderId, onBidSubmitted, disabled = false }: {
+    tenderId: string;
+    onBidSubmitted: () => void;
+    disabled?: boolean;
+  }) => {
     const [amount, setAmount] = useState<string>('');
     const [proposal, setProposal] = useState<string>('');
-    const [loading, setLoading] = useState<boolean>(false);
-    const [error, setError] = useState<string | null>(null);
+    const [bidError, setBidError] = useState<string | null>(null);
+    const [bidLoading, setBidLoading] = useState<boolean>(false);
     
-    const { account } = useWeb3();
-    const tenderAPI = useTenderAPI();
-    
-    // Use parent's contractTender directly (no need to destructure or create new instance)
-    const isNumericId = !isNaN(Number(tenderId));
-    const canUseBlockchain = isNumericId && contractTender.isContractAvailable && !disabled;
-    
-    // Добавляем отладочную информацию о состоянии контракта
-    useEffect(() => {
-      console.log('BidForm Contract Status:', {
-        isNumericId,
-        contractAvailable: contractTender.isContractAvailable,
-        disabled,
-        canUseBlockchain,
-        accountConnected: !!account,
-        tenderId
-      });
-    }, [isNumericId, contractTender.isContractAvailable, disabled, canUseBlockchain, account, tenderId]);
-    
-    const handleSubmit = useCallback(async (e: FormEvent) => {
+    const handleSubmit = async (e: FormEvent) => {
       e.preventDefault();
       
-      if (!account) {
-        setError('Пожалуйста, подключите кошелек');
-        return;
-      }
-      
       if (!amount || !proposal) {
-        setError('Пожалуйста, заполните все поля');
+        setBidError('Please fill in all fields');
         return;
       }
       
-      setLoading(true);
-      setError(null);
+      if (!account) {
+        setBidError('Please connect your wallet first');
+        return;
+      }
+      
+      setBidLoading(true);
+      setBidError(null);
       
       try {
-        console.log(`Submitting bid for tender ${tenderId} with amount: ${amount}, proposal: ${proposal}`);
-        console.log('Contract status before submission:', {
-          isNumericId, 
-          contractAvailable: contractTender.isContractAvailable,
-          canUseBlockchain
-        });
-        
-        let success = false;
-        
-        if (canUseBlockchain) {
-          console.log('Submitting to blockchain...');
-          toast.loading('Отправка заявки в блокчейн...', { id: 'bid-submission' });
-          const numericAmount = parseFloat(amount);
-          // Use contractTender directly instead of destructured submitBid
-          const result = await contractTender.submitBid(tenderId, numericAmount, proposal);
-          console.log('Blockchain submission result:', result);
-          success = !!result?.success;
+        if (contractTender.isContractAvailable) {
+          console.log('Submitting bid to blockchain...');
+          const response = await contractTender.submitBid(tenderId, parseFloat(amount), proposal);
           
-          if (success) {
-            console.log('Bid submitted to blockchain successfully');
-            toast.success('Ваша заявка успешно отправлена в блокчейн!', { id: 'bid-submission' });
-            
-            // Show transaction hash if available
-            if (result.hash) {
-              const txHash = result.hash as string;
-              const truncatedHash = `${txHash.slice(0, 6)}...${txHash.slice(-4)}`;
-              toast.success(
-                <div>
-                  <p>Транзакция выполнена!</p>
-                  <a 
-                    href={`https://sepolia.etherscan.io/tx/${txHash}`} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    className="text-blue-500 underline"
-                  >
-                    {truncatedHash}
-                  </a>
-                </div>, 
-                { duration: 5000 }
-              );
-            }
-          } else if (result?.error) {
-            throw new Error(result.error);
+          if (response.success) {
+            toast.success('Bid submitted to blockchain successfully!');
+            setAmount('');
+            setProposal('');
+            if (onBidSubmitted) onBidSubmitted();
+          } else {
+            console.error('Error submitting bid to blockchain:', response.error);
+            setBidError(`Blockchain error: ${response.error}`);
           }
         } else {
-          console.log('Submitting to API...');
-          toast.loading('Отправка заявки...', { id: 'bid-submission' });
-          
-          try {
-            const result = await tenderAPI.createBid({
-              tenderId,
-              amount: parseFloat(amount),
-              proposal,
-            });
-            success = !!result.data;
-            
-            if (success) {
-              console.log('Bid submitted to API successfully');
-              toast.success('Ваша заявка успешно отправлена!', { id: 'bid-submission' });
-            } else if (result.error) {
-              // If we're in mock mode, consider it a success anyway
-              if (tenderAPI.useMockData) {
-                console.log('Using mock data due to API error:', result.error);
-                toast.success('Заявка отправлена в демо-режиме (API недоступен)', { id: 'bid-submission' });
-                success = true;
-              } else {
-                throw new Error(result.error);
-              }
-            }
-          } catch (apiError) {
-            console.error('API error during bid submission:', apiError);
-            
-            // Check if we can use mock data as fallback
-            if (tenderAPI.useMockData || process.env.NODE_ENV === 'development') {
-              console.log('Using mock data due to API issues');
-              toast.success('Заявка отправлена в демо-режиме (API недоступен)', { id: 'bid-submission' });
-              success = true;
-              
-              // If not already in mock mode, toggle it if possible
-              if (!tenderAPI.useMockData && typeof tenderAPI.toggleMockData === 'function') {
-                tenderAPI.toggleMockData();
-              }
-            } else {
-              throw apiError;
-            }
-          }
+          setBidError('Contract is not available');
         }
-        
-        if (success) {
-          setAmount('');
-          setProposal('');
-          if (onBidSubmitted) {
-            onBidSubmitted();
-          }
-        }
-      } catch (err) {
-        console.error('Error submitting bid:', err);
-        
-        // Create a user-friendly error message
-        let errorMessage = 'Ошибка при отправке заявки';
-        
-        if (err instanceof Error) {
-          if (err.message.includes('DOCTYPE html') || err.message.includes('Expected JSON')) {
-            errorMessage = 'Сервер временно недоступен. Пожалуйста, попробуйте позже.';
-          } else if (err.message.includes('Failed to fetch') || err.message.includes('Network')) {
-            errorMessage = 'Проблема с сетевым подключением. Проверьте интернет-соединение.';
-          } else if (err.message.includes('rejected') || err.message.includes('user rejected transaction')) {
-            errorMessage = 'Транзакция была отклонена пользователем.';
-          } else if (err.message.includes('insufficient funds')) {
-            errorMessage = 'Недостаточно средств для выполнения транзакции.';
-          } else {
-            errorMessage = err.message;
-          }
-        }
-        
-        setError(errorMessage);
-        toast.error(`Ошибка: ${errorMessage}`, { id: 'bid-submission' });
+      } catch (error) {
+        console.error('Error submitting bid:', error);
+        setBidError(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       } finally {
-        setLoading(false);
+        setBidLoading(false);
       }
-    }, [account, amount, proposal, tenderId, contractTender, tenderAPI, onBidSubmitted, canUseBlockchain]);
+    };
     
     return (
-      <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
-        <h3 className="text-xl font-semibold mb-4">Отправить заявку</h3>
+      <div className="p-4 bg-white rounded-lg shadow">
+        <h3 className="text-lg font-semibold mb-2">Submit Bid</h3>
         
-        {isNumericId && (
-          <div className="mb-4 p-2 bg-gray-100 rounded text-sm">
-            <p>
-              Статус смарт-контракта: {contractTender.isContractAvailable ? 
-                <span className="text-green-600 font-semibold">Доступен</span> : 
-                <span className="text-red-600 font-semibold">Недоступен</span>}
-            </p>
-            <p>ID тендера: {tenderId} ({isNumericId ? 'числовой' : 'не числовой'})</p>
-            <p>Метод отправки: {canUseBlockchain ? 'Блокчейн' : 'API'}</p>
-            
-            {!contractTender.isContractAvailable && (
-              <div className="mt-2">
-                <p className="text-amber-600 mb-1">Смарт-контракт недоступен - ваша заявка будет отправлена через API</p>
-                <button 
-                  onClick={() => {
-                    toast.loading('Подключение к смарт-контракту...', { id: 'contract-connect' });
-                    contractTender.checkContractStatus().then(success => {
-                      if (success) {
-                        toast.success('Смарт-контракт успешно инициализирован!', { id: 'contract-connect' });
-                      } else {
-                        toast.error('Не удалось подключиться к смарт-контракту', { id: 'contract-connect' });
-                      }
-                    });
-                  }}
-                  className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded"
-                >
-                  Переподключить смарт-контракт
-                </button>
-              </div>
-            )}
+        {bidError && (
+          <div className="mb-4 p-3 bg-red-50 text-red-700 rounded border border-red-200">
+            {bidError}
           </div>
         )}
         
         <form onSubmit={handleSubmit}>
           <div className="mb-4">
-            <label htmlFor="amount" className="block text-sm font-medium text-gray-700">
-              Сумма (ETH)
-            </label>
+            <label className="block text-sm font-medium mb-1">Amount (USD)</label>
             <input
               type="number"
-              id="amount"
-              step="0.001"
-              min="0"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              required
+              disabled={disabled || bidLoading}
+              className="w-full p-2 border rounded focus:ring-blue-500 focus:border-blue-500"
+              placeholder="Enter your bid amount"
             />
           </div>
-          
           <div className="mb-4">
-            <label htmlFor="proposal" className="block text-sm font-medium text-gray-700">
-              Ваше предложение
-            </label>
+            <label className="block text-sm font-medium mb-1">Proposal</label>
             <textarea
-              id="proposal"
               value={proposal}
               onChange={(e) => setProposal(e.target.value)}
-              rows={4}
-              className="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-              required
+              disabled={disabled || bidLoading}
+              className="w-full p-2 border rounded focus:ring-blue-500 focus:border-blue-500"
+              rows={3}
+              placeholder="Describe your proposal"
             />
           </div>
-          
-          {error && (
-            <div className="mb-4 text-red-500 text-sm">{error}</div>
-          )}
-          
           <button
             type="submit"
-            disabled={loading || !account}
-            className={`w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white 
-              ${loading || !account ? 'bg-gray-400' : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500'}`}
+            disabled={disabled || bidLoading || !amount || !proposal}
+            className={`w-full py-2 px-4 rounded text-white ${
+              bidLoading || !amount || !proposal
+                ? 'bg-gray-300 cursor-not-allowed'
+                : 'bg-blue-600 hover:bg-blue-700 focus:ring-blue-500'
+            }`}
           >
-            {loading ? 'Отправка...' : 'Отправить заявку'}
+            {bidLoading ? (
+              <>
+                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Processing...
+              </>
+            ) : (
+              'Submit Bid'
+            )}
           </button>
-          
-          {!account && (
-            <div className="mt-3 text-sm text-gray-500 text-center">
-              Вам необходимо подключить кошелек для отправки заявки
-            </div>
-          )}
         </form>
       </div>
     );
   });
 
-  // Add a function to refresh data after interactions
-  const refreshData = useCallback(() => {
-    if (id && typeof id === 'string') {
-      const isNumericId = !isNaN(Number(id));
+  // Add a function to verify blockchain status
+  const verifyTenderInBlockchain = useCallback(async () => {
+    if (!id || !contractTender.isContractAvailable) return;
+    
+    setIsVerifying(true);
+    
+    try {
+      // Check if tender ID is numeric (blockchain IDs must be numeric)
+      const isNumericId = /^\d+$/.test(id as string);
+      if (!isNumericId) {
+        setTenderBlockchainStatus({
+          exists: false,
+          message: 'Тендер доступен только в базе данных (ID не является числовым)'
+        });
+        return;
+      }
       
-      // Refresh bids list
-      if (isNumericId && tender?.fromBlockchain) {
-        console.log('Refreshing blockchain tender data');
-        contractTender.getTender(id).then(result => {
-          if (result.success && result.data) {
-            setTender(adaptBlockchainTenderToDetails(result.data));
-          }
+      // Try to get tender from blockchain
+      const response = await contractTender.getTender(id as string);
+      
+      if (response.success && response.data) {
+        setTenderBlockchainStatus({
+          exists: true,
+          message: 'Тендер существует в блокчейне'
+        });
+      } else {
+        setTenderBlockchainStatus({
+          exists: false,
+          message: response.error || 'Тендер не найден в блокчейне'
         });
       }
+    } catch (error: any) {
+      console.error('Error verifying tender in blockchain:', error);
+      setTenderBlockchainStatus({
+        exists: false,
+        message: `Ошибка проверки: ${error.message}`
+      });
+    } finally {
+      setIsVerifying(false);
     }
-  }, [id, tender?.fromBlockchain, contractTender]);
+  }, [id, contractTender]);
   
-  // Add a section to display the tender's bids from blockchain if applicable
-  const renderBidsList = () => {
-    if (!id || !tender) return null;
-    
-    return (
-      <div className="mt-8">
-        <BidsList 
-          tenderId={typeof id === 'string' ? id : Array.isArray(id) ? id[0] : ''} 
-          isBlockchainTender={!!tender.fromBlockchain} 
-        />
-      </div>
-    );
-  };
+  // Call verification on initial load
+  useEffect(() => {
+    if (contractTender.isContractAvailable && id) {
+      verifyTenderInBlockchain();
+    }
+  }, [contractTender.isContractAvailable, id, verifyTenderInBlockchain]);
 
-  // Add button for blockchain bid submission
-  const renderBidButton = () => {
-    if (!tender || !account) return null;
-    
-    // If this is the creator, don't show bid button
-    const isCreator = account && tender.creator && account.toLowerCase() === tender.creator.toLowerCase();
-    if (isCreator) {
-      return null;
-    }
-    
-    // Only show for open tenders
-    if (tender.status !== 'OPEN') {
-      return null;
-    }
+  // Display blockchain verification status if verification was attempted
+  const renderBlockchainStatus = () => {
+    if (!contractTender.isContractAvailable) return null;
     
     return (
-      <div className="mt-6">
-        <button
-          onClick={() => setShowBidModal(true)}
-          className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-md font-medium w-full md:w-auto"
-        >
-          {tender.fromBlockchain ? 'Участвовать через блокчейн' : 'Отправить заявку'}
-        </button>
+      <div className="mt-4 p-3 rounded-lg bg-gray-50 border border-gray-200">
+        <h3 className="text-sm font-medium text-gray-700 mb-2">Статус в блокчейне:</h3>
+        
+        {isVerifying ? (
+          <p className="text-sm text-gray-500">Проверка...</p>
+        ) : tenderBlockchainStatus ? (
+          <div>
+            <div className={`flex items-center ${tenderBlockchainStatus.exists ? 'text-green-600' : 'text-amber-600'}`}>
+              {tenderBlockchainStatus.exists ? (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                </svg>
+              )}
+              <span className="text-sm font-medium">{tenderBlockchainStatus.message}</span>
+            </div>
+            
+            {!tenderBlockchainStatus.exists && tender && (
+              <button
+                onClick={verifyTenderInBlockchain}
+                className="mt-2 px-3 py-1 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md transition duration-150"
+              >
+                Проверить снова
+              </button>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={verifyTenderInBlockchain}
+            className="px-3 py-1 text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md transition duration-150"
+          >
+            Проверить статус в блокчейне
+          </button>
+        )}
       </div>
     );
   };
@@ -816,17 +810,15 @@ export default function TenderDetail() {
                 <div className="space-y-3">
                   <p className="flex justify-between">
                     <span className="font-medium text-gray-600">Создан:</span> 
-                    <span>{new Date(tender.createdAt).toLocaleString()}</span>
+                    <span>{safeRenderDate(tender.createdAt)}</span>
                   </p>
                   <p className="flex justify-between">
                     <span className="font-medium text-gray-600">Действует до:</span> 
-                    <span>{new Date(tender.expiresAt).toLocaleString()}</span>
+                    <span>{safeRenderDate(tender.expiresAt)}</span>
                   </p>
                   <p className="flex justify-between">
                     <span className="font-medium text-gray-600">Срок исполнения:</span> 
-                    <span>{typeof tender.deadline === 'bigint' || typeof tender.deadline === 'number'
-                      ? new Date(Number(tender.deadline.toString())).toLocaleString()
-                      : new Date(tender.deadline).toLocaleString()}</span>
+                    <span>{safeRenderDate(tender.deadline)}</span>
                   </p>
                   <p className="flex justify-between">
                     <span className="font-medium text-gray-600">Создатель:</span> 
@@ -841,6 +833,9 @@ export default function TenderDetail() {
                 </div>
               </div>
             </div>
+            
+            {/* Add blockchain status information here */}
+            {renderBlockchainStatus()}
             
             <div className="mt-6 border-t pt-6">
               {error && (
@@ -922,6 +917,7 @@ export default function TenderDetail() {
                         <BidForm 
                           tenderId={typeof id === 'string' ? id : Array.isArray(id) ? id[0] : ''} 
                           onBidSubmitted={refreshData} 
+                          disabled={false}
                         />
                       </div>
                     </div>
@@ -944,6 +940,7 @@ export default function TenderDetail() {
                         <BidForm 
                           tenderId={typeof id === 'string' ? id : Array.isArray(id) ? id[0] : ''} 
                           onBidSubmitted={refreshData} 
+                          disabled={false}
                         />
                       </div>
                     </div>
@@ -1013,7 +1010,74 @@ export default function TenderDetail() {
                   <p>status: {tender.status}</p>
                   <p>expiresAt: {tender.expiresAt ? new Date(tender.expiresAt).toLocaleString() : 'не указано'}</p>
                   <p>isExpired: {isExpired ? 'true' : 'false'}</p>
+                  <p>Источник: {tender.fromBlockchain ? 'Блокчейн' : 'База данных'}</p>
+                  <p>ID: {tender.id}</p>
+                  <p>Числовой ID: {!isNaN(Number(tender.id)) ? 'Да' : 'Нет'}</p>
                 </div>
+                
+                {!tender.fromBlockchain && contractTender.isContractAvailable && (
+                  <div className="mt-3">
+                    <button
+                      onClick={async () => {
+                        if (!account) {
+                          alert("Пожалуйста, подключите кошелек");
+                          return;
+                        }
+                        
+                        if (!contractTender.isContractAvailable) {
+                          alert("Смарт-контракт недоступен");
+                          return;
+                        }
+                        
+                        if (!confirm("Вы хотите мигрировать этот тендер в блокчейн? Это создаст новую копию тендера в блокчейне.")) {
+                          return;
+                        }
+                        
+                        try {
+                          setIsBlockchainLoading(true);
+                          const result = await migrateTenderToBlockchain();
+                          
+                          if (result && result.success && result.data?.id) {
+                            // Update the tender object with the correct property types
+                            // that match ExtendedContractTender interface
+                            setTender({
+                              ...tender,
+                              fromBlockchain: true,
+                              isFromBlockchain: true,
+                              blockchainId: String(result.data.id) // Convert to string to match the interface
+                            });
+                            
+                            toast.success('Тендер успешно создан в блокчейне!');
+                            
+                            // Close modal and refresh
+                            setShowBlockchainModal(false);
+                            refreshData();
+                          } else {
+                            // Use setBlockchainError which is defined in state
+                            setBlockchainError(result?.error || 'Не удалось создать тендер в блокчейне');
+                          }
+                        } catch (error) {
+                          console.error("Ошибка миграции тендера:", error);
+                          setBlockchainError(error instanceof Error ? error.message : 'Неизвестная ошибка');
+                        } finally {
+                          setIsBlockchainLoading(false);
+                        }
+                      }}
+                      className="px-3 py-1 bg-blue-500 text-white rounded text-xs hover:bg-blue-600"
+                      disabled={isBlockchainLoading}
+                    >
+                      {isBlockchainLoading ? 'Миграция...' : 'Мигрировать в блокчейн'}
+                    </button>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Это создаст копию тендера в блокчейне с новым ID
+                    </p>
+                    {blockchainError && (
+                      <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-600">
+                        <strong>Ошибка:</strong> {blockchainError}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1021,10 +1085,21 @@ export default function TenderDetail() {
       </div>
       
       {/* Add BidsList after tender details */}
-      {renderBidsList()}
+      {tender && tender.fromBlockchain && (
+        <BidsListBlock tenderId={tender.id} onRefresh={() => fetchTender()} />
+      )}
       
       {/* Add bid button */}
-      {renderBidButton()}
+      {tender && tender.fromBlockchain && (
+        <div className="mt-6">
+          <button
+            onClick={() => setShowBidModal(true)}
+            className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-md font-medium w-full md:w-auto"
+          >
+            Участвовать через блокчейн
+          </button>
+        </div>
+      )}
       
       {/* Add the blockchain bids list component if the tender is from blockchain */}
       {tender && tender.fromBlockchain && (
@@ -1038,23 +1113,23 @@ export default function TenderDetail() {
             id: tender.id,
             title: tender.title,
             description: tender.description,
-            budget: String(tender.budget),
-            deadline: tender.deadline,
+            budget: Number(tender.budget),
+            deadline: String(tender.deadline),
             status: tender.status,
             createdAt: tender.createdAt,
             expiresAt: tender.expiresAt,
             creator: tender.creator,
-            timeLeft: tender.timeLeft,
-            distance: String(tender.distance || ''),
-            weight: String(tender.weight || ''),
+            timeLeft: tender.timeLeft ? String(tender.timeLeft) : undefined,
+            distance: tender.distance,
+            weight: tender.weight,
             cargoType: tender.cargoType,
             urgencyDays: tender.urgencyDays,
             fromBlockchain: tender.fromBlockchain
           }}
           isOpen={showBidModal}
           onClose={() => setShowBidModal(false)}
-          onBidSubmitted={() => {
-            fetchTender();
+          onBidSubmitted={async () => {
+            await fetchTender();
             toast.success('Заявка успешно отправлена!');
           }}
         />

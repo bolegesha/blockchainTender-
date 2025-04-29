@@ -50,7 +50,6 @@ export default async function handler(
           select: {
             id: true,
             name: true,
-            email: true,
             walletAddress: true,
             createdAt: true,
             _count: {
@@ -103,7 +102,6 @@ export default async function handler(
             data: {
               walletAddress: formattedWalletAddress,
               name: name || `User-${formattedWalletAddress.substring(0, 8)}`,
-              email,
             },
           });
 

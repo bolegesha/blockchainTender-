@@ -288,7 +288,7 @@ const TenderCard = memo(function TenderCard({ tender, isOwner, timeLeft, isUrgen
   
   // Format date only when tender.createdAt changes
   const formattedDate = useMemo(() => {
-    const createdDate = new Date(tender.createdAt);
+  const createdDate = new Date(tender.createdAt);
     return formatDistanceToNow(createdDate, { addSuffix: true, locale: ru });
   }, [tender.createdAt]);
   
@@ -305,75 +305,75 @@ const TenderCard = memo(function TenderCard({ tender, isOwner, timeLeft, isUrgen
     // Перенаправляем на страницу тендера
     window.location.href = `/tender/${tender.id}`;
   };
-
+  
   return (
     <>
       <div className={`bg-white rounded-lg shadow-md p-4 mb-4 hover:shadow-lg transition-shadow ${isUrgent ? 'border-l-4 border-red-500' : ''}`}>
-        <div className="flex justify-between items-center mb-2">
-          <h3 className="text-lg font-semibold">{tender.title}</h3>
-          <div className="flex space-x-2">
+      <div className="flex justify-between items-center mb-2">
+        <h3 className="text-lg font-semibold">{tender.title}</h3>
+        <div className="flex space-x-2">
             {isBlockchain ? (
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                Блокчейн
-              </span>
-            ) : (
-              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                База данных
-              </span>
-            )}
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(tender.status)}`}>
-              {getStatusText(tender.status)}
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+              Блокчейн
             </span>
-          </div>
+          ) : (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+              База данных
+            </span>
+          )}
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(tender.status)}`}>
+            {getStatusText(tender.status)}
+          </span>
         </div>
-        
-        <p className="text-sm text-gray-600 mb-2">{tender.description}</p>
-        
+      </div>
+      
+      <p className="text-sm text-gray-600 mb-2">{tender.description}</p>
+      
         {tender.categories && tender.categories.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
+      <div className="flex flex-wrap gap-2 mb-2">
             {tender.categories.map((category, index) => (
-              <span key={index} className="px-2 py-1 rounded-full text-xs bg-gray-200 text-gray-700">
-                {typeof category === 'string' ? category : (category && 'name' in category) ? category.name : ''}
-              </span>
-            ))}
+          <span key={index} className="px-2 py-1 rounded-full text-xs bg-gray-200 text-gray-700">
+            {typeof category === 'string' ? category : (category && 'name' in category) ? category.name : ''}
+          </span>
+        ))}
+      </div>
+        )}
+      
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <div className="text-sm text-gray-600">
+          <span className="font-medium">Бюджет:</span> ${tender.budget}
+        </div>
+        {tender.distance && (
+          <div className="text-sm text-gray-600">
+            <span className="font-medium">Расстояние:</span> {tender.distance} км
           </div>
         )}
-        
-        <div className="grid grid-cols-2 gap-2 mb-4">
+        {tender.weight && (
           <div className="text-sm text-gray-600">
-            <span className="font-medium">Бюджет:</span> ${tender.budget}
+            <span className="font-medium">Вес груза:</span> {tender.weight} кг
           </div>
-          {tender.distance && (
-            <div className="text-sm text-gray-600">
-              <span className="font-medium">Расстояние:</span> {tender.distance} км
-            </div>
-          )}
-          {tender.weight && (
-            <div className="text-sm text-gray-600">
-              <span className="font-medium">Вес груза:</span> {tender.weight} кг
-            </div>
-          )}
-          <div className="text-sm text-gray-600">
-            <span className="font-medium">Создан:</span> {formattedDate}
-          </div>
-          {formattedTimeLeft && (
-            <div className="text-sm text-gray-600">
-              <span className="font-medium">Осталось:</span> {formattedTimeLeft}
-            </div>
-          )}
+        )}
+        <div className="text-sm text-gray-600">
+          <span className="font-medium">Создан:</span> {formattedDate}
         </div>
-        
-        <div className="flex justify-between items-center">
-          <div className="text-sm text-gray-500 truncate">
-            Создатель: {tender.walletAddress?.slice(0, 6)}...{tender.walletAddress?.slice(-4)}
+          {formattedTimeLeft && (
+          <div className="text-sm text-gray-600">
+              <span className="font-medium">Осталось:</span> {formattedTimeLeft}
           </div>
+        )}
+      </div>
+      
+      <div className="flex justify-between items-center">
+        <div className="text-sm text-gray-500 truncate">
+          Создатель: {tender.walletAddress?.slice(0, 6)}...{tender.walletAddress?.slice(-4)}
+        </div>
           <div className="flex space-x-2">
             <button
               onClick={() => setIsModalOpen(true)}
               className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded"
             >
-              Подробнее
-            </button>
+            Подробнее
+          </button>
             
             {tender.status === 'OPEN' && (
               <button

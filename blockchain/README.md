@@ -120,3 +120,30 @@ npx hardhat test
 ## License
 
 This project is licensed under the MIT License. 
+
+## Fixing Tender Synchronization Issues
+
+If you encounter "Tender does not exist" errors when trying to interact with tenders in the blockchain, you can use the synchronization fixer tool to check and resolve these issues:
+
+1. First, make sure your Hardhat node is running:
+   ```
+   npx hardhat node
+   ```
+
+2. In a separate terminal, run the fix-tender-sync.js script:
+   ```
+   npx hardhat run scripts/fix-tender-sync.js --network localhost
+   ```
+
+3. Follow the prompts to:
+   - Check if a tender exists in the blockchain
+   - Create a tender in the blockchain
+   - List all active tenders
+
+### Common Issues
+
+1. **"Tender does not exist" error**: This happens when a tender exists in the database but not in the blockchain. Use the fix-tender-sync.js script to create it in the blockchain.
+
+2. **Contract function mismatch**: The TenderChain.sol contract uses `takeTender()` to participate in a tender, not `submitBid()`. If you see "contractRef.current.submitBid is not a function", it means your frontend is trying to call a function that doesn't exist.
+
+3. **Network mismatch**: Make sure your MetaMask is connected to the correct network (Localhost:8545 for development). 

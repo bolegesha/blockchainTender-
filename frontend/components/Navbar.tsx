@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { useWeb3 } from '../hooks/useWeb3';
+import NetworkSelector from './NetworkSelector';
 
 export default function Navbar() {
   const { account, connectWallet, isConnecting } = useWeb3();
@@ -29,7 +30,8 @@ export default function Navbar() {
               </Link>
             </div>
           </div>
-          <div className="flex items-center">
+          <div className="flex items-center space-x-3">
+            <NetworkSelector />
             {account ? (
               <div className="text-sm font-medium text-gray-900 bg-gray-100 rounded-full px-4 py-2">
                 {account.substring(0, 6)}...{account.substring(account.length - 4)}

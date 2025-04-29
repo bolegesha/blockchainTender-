@@ -35,7 +35,7 @@ export default function App({ Component, pageProps }: AppProps) {
       <Toaster 
         position="top-right"
         toastOptions={{
-          duration: 3000,
+          duration: 6000,
           style: {
             borderRadius: '8px', 
             background: '#333', 

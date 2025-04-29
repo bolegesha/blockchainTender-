@@ -782,55 +782,47 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-100">
       <Navbar />
       <div className="container mx-auto px-4 py-8">
-        {contractWarning && (
-          <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded relative mb-6" role="alert">
-            <div className="flex justify-between items-start">
-              <div>
-                <strong className="font-bold">Внимание!</strong>
-                <span className="block sm:inline"> {contractWarning}</span>
-              </div>
-              {tenderAPI.useMockData && (
-                <button 
-                  onClick={() => {
-                    tenderAPI.toggleMockData();
-                    fetchTenders(true);
-                  }}
-                  className="bg-yellow-500 hover:bg-yellow-600 text-white px-3 py-1 rounded-md text-sm"
-                >
-                  Повторить подключение
-                </button>
-              )}
-            </div>
-            
-            {contractWarning.includes('смарт-контракт недоступен') && (
-              <div className="mt-2 text-sm">
-                <p className="font-semibold">Для тестирования с блокчейном:</p>
-                <ol className="list-decimal pl-5 mt-1">
-                  <li>Запустите локальный блокчейн: <code className="bg-gray-200 px-1 rounded">cd blockchain && npx hardhat node</code></li>
-                  <li>Разверните контракт: <code className="bg-gray-200 px-1 rounded">npx hardhat run scripts/deploy.js --network localhost</code></li>
-                  <li>Обновите адрес контракта в .env файле</li>
-                  <li>Перезапустите фронтенд-сервер</li>
-                </ol>
-              </div>
-            )}
-            
-            {contractWarning.includes('демо-тендеры') && (
-              <div className="mt-2 text-sm">
-                <p className="font-semibold">Возможные причины:</p>
-                <ul className="list-disc pl-5 mt-1">
-                  <li>Проблема с сетевым подключением</li>
-                  <li>API-сервер не запущен или недоступен</li>
-                  <li>Временная проблема с сервером</li>
-                </ul>
-                <p className="mt-2">
-                  <span className="font-semibold">Примечание:</span> Пока показываются демо-данные. Когда соединение восстановится, 
-                  нажмите кнопку "Повторить подключение" или обновите страницу.
-                </p>
-              </div>
-            )}
+        <h1 className="text-2xl font-bold mb-6">Доступные тендеры</h1>
+        
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+            {error}
           </div>
         )}
-      
+        
+        {contractWarning && (
+          <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-4">
+            {contractWarning}
+          </div>
+        )}
+        
+        {/* Отладочная информация */}
+        <div className="bg-gray-100 border border-gray-400 text-gray-700 px-4 py-3 rounded mb-4 text-xs">
+          <h3 className="font-bold">Отладочная информация:</h3>
+          <p>Адрес контракта: {process.env.NEXT_PUBLIC_CONTRACT_ADDRESS}</p>
+          <p>Кошелек подключен: {account ? 'Да' : 'Нет'}</p>
+          <p>Доступность контракта: {contractTender.isContractAvailable ? 'Доступен' : 'Недоступен'}</p>
+          <p>Статус контракта: {contractTender.contractStatus}</p>
+          <p>Ошибка контракта: {contractTender.error || 'Нет'}</p>
+          {contractTender.contractErrorDetails && (
+            <p>Детали ошибки: {contractTender.contractErrorDetails}</p>
+          )}
+          <div className="mt-2 flex space-x-2">
+            <button
+              onClick={() => contractTender.forceContractInitialization()}
+              className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 focus:outline-none"
+            >
+              Переподключиться к контракту
+            </button>
+            <button
+              onClick={() => window.location.reload()}
+              className="text-xs px-2 py-1 bg-gray-500 text-white rounded hover:bg-gray-600 focus:outline-none"
+            >
+              Обновить страницу
+            </button>
+          </div>
+        </div>
+        
         <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
           <div className="flex items-center">
             <h1 className="text-3xl font-bold text-gray-900">Тендеры</h1>

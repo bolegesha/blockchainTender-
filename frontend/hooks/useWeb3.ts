@@ -203,6 +203,7 @@ export function useWeb3() {
     chainId: memoizedChainIdValue,
     connectWallet,
     isConnecting,
+    isConnected: !!memoizedAccountValue,
     error
   };
 }
